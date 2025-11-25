@@ -24,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModel
 import com.example.compassandlevel.ui.theme.CompassAndLevelTheme
 
 class MainActivity : ComponentActivity(), SensorEventListener {
@@ -32,19 +33,33 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     private var accelerometer : Sensor? = null
     private var magnetometer : Sensor? = null
 
-    // accelerometer readings
-    private var _x by mutableFloatStateOf(0f)
-    private var _y by mutableFloatStateOf(0f)
-    private var _z by mutableFloatStateOf(0f)
+//    private var gyroscope : Sensor? : null
 
-    // magnetometer readigns
-    private var _mx by mutableFloatStateOf(0f)
-    private var _my by mutableFloatStateOf(0f)
-    private var _mz by mutableFloatStateOf(0f)
+    // accelerometer readings
+//    private var _x by mutableFloatStateOf(0f)
+//    private var _y by mutableFloatStateOf(0f)
+//    private var _z by mutableFloatStateOf(0f)
+//
+//    // magnetometer readigns
+//    private var _mx by mutableFloatStateOf(0f)
+//    private var _my by mutableFloatStateOf(0f)
+//    private var _mz by mutableFloatStateOf(0f)
+    private var accelerometerValues: FloatArray? = null
+    private var magnetometerValues: FloatArray? = null
+
+    private var accelerometerReading by mutableStateOf(false)
+    private var magnetometerReading by mutableStateOf(false)
     private var _accuracy by mutableStateOf("Unknown")
+
+    private var _gx by mutableFloatStateOf(0f)
+    private var _gy by mutableFloatStateOf(0f)
+    private var _gz by mutableFloatStateOf(0f)
 
     private var _orientationAngle by mutableFloatStateOf(0f)
     private var _compassDirection by mutableStateOf("")
+
+    // uing my view model
+    val viewModel: MyViewModel = MyViewModel()
 
 
 
@@ -65,7 +80,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 //                        name = "Android",
 //                        modifier = Modifier.padding(innerPadding)
 //                    )
-                    CompassScreen(direction = _compassDirection)
+                    CompassScreen(viewModel)
                 }
             }
         }
@@ -93,26 +108,31 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         event?.let {
             when(it.sensor.type) { // do different things depending on sensor type
                 Sensor.TYPE_ACCELEROMETER -> {
-                    _x = it.values[0]
-                    _y = it.values[1]
-                    _z = it.values[2]
+//                    _x = it.values.clone()[0]
+//                    _y = it.values.clone()[1]
+//                    _z = it.values.clone()[2]
+                    accelerometerValues = it.values.clone()
+                    accelerometerReading = true
                 }
                 Sensor.TYPE_MAGNETIC_FIELD -> {
-                    _mx = it.values[0]
-                    _my = it.values[1]
-                    _mz = it.values[2]
+//                    _mx = it.values.clone()[0]
+//                    _my = it.values.clone()[1]
+//                    _mz = it.values.clone()[2]
+                    magnetometerValues = it.values.clone()
+                    magnetometerReading = true
                 }
             }
         }
-        _orientationAngle = calculateOrientation(floatArrayOf(_x, _y, _z), floatArrayOf(_mx, _my, _mz))
-        _compassDirection = _orientationAngle.toString()
-//        _compassDirection = when(_orientationAngle) {
-//            0f -> "N"
-//            90f -> "E"
-//            180f -> "S"
-//            270f -> "W"
-//            else -> {"middle"}
-//        }
+        // do this only if you have all readings
+        if (accelerometerReading && magnetometerReading) {
+//            _orientationAngle =
+//                calculateOrientation(floatArrayOf(_x, _y, _z), floatArrayOf(_mx, _my, _mz))
+//            _compassDirection = _orientationAngle.toString()
+//            viewModel.updateOrientation(floatArrayOf(_x, _y, _z), floatArrayOf(_mx, _my, _mz))
+            viewModel.updateOrientation(accelerometerValues, magnetometerValues)
+
+
+        }
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
@@ -152,7 +172,7 @@ fun GreetingPreview() {
 //Make the UI interesting and fun.
 
 @Composable
-fun CompassScreen(direction : String) {
+fun CompassScreen(viewModel: MyViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -160,21 +180,63 @@ fun CompassScreen(direction : String) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text(text = direction)
+        Text(text = "Direction: ${viewModel.compassDirection}")
+        Text(text = "Angle: ${viewModel.orientationAngle.toInt()}°")
+        Text(text = "Raw Angle: ${"%.2f".format(viewModel.orientationAngle)}°")
     }
 }
 
-private fun calculateOrientation(accelerometerReading : FloatArray, magnetometerReading : FloatArray) : Float {
+private fun calculateOrientation(accelerometerReading : FloatArray?, magnetometerReading : FloatArray?) : Float {
     val rotationMatrix = FloatArray(9)
-    SensorManager.getRotationMatrix(rotationMatrix, null, accelerometerReading, magnetometerReading)
+//    SensorManager.getRotationMatrix(rotationMatrix, null, accelerometerReading, magnetometerReading)
+    val success = SensorManager.getRotationMatrix(rotationMatrix, null, accelerometerReading, magnetometerReading)
+
+    if (!success) {
+        android.util.Log.e("CompassDebug", "getRotationMatrix failed!")
+        return 0f
+    }
 
     val orientationAngles = FloatArray(3)
     SensorManager.getOrientation(rotationMatrix, orientationAngles)
 
     // azimuth angles orientationAngles[0] correspond to compass direction
-    var azimuthAngle = orientationAngles[0]
+    var azimuthRadians = orientationAngles[0]
+    var azimuthAngle = Math.toDegrees(azimuthRadians.toDouble()).toFloat()
     if (azimuthAngle < 0) {
-        azimuthAngle += 360; // Ensure positive values
+        azimuthAngle += 360 // Ensure positive values
     }
     return azimuthAngle
 }
+
+// need a viewmodel because the configuration change makes everyhting reset as N
+// cant use rmemeber saveable from main (or any non composable) so just use view model
+
+class MyViewModel : ViewModel() {
+    var orientationAngle by mutableFloatStateOf(0f)
+    var compassDirection by mutableStateOf("")
+
+    // function to update orientation
+    fun updateOrientation(accelerometerReading : FloatArray?, magnetometerReading : FloatArray?) {
+        android.util.Log.d("CompassDebug", "Accel: ${accelerometerReading.contentToString()}")
+        android.util.Log.d("CompassDebug", "Mag: ${magnetometerReading.contentToString()}")
+
+        val azimuthAngle = calculateOrientation(accelerometerReading, magnetometerReading)
+        android.util.Log.d("CompassDebug", "Azimuth angle after normalization: $azimuthAngle")
+        orientationAngle = azimuthAngle
+        compassDirection = when {
+            azimuthAngle >= 337.5f || azimuthAngle < 22.5f -> "N"
+            azimuthAngle >= 22.5f && azimuthAngle < 67.5f -> "NE"
+            azimuthAngle >= 67.5f && azimuthAngle < 112.5f -> "E"
+            azimuthAngle >= 112.5f && azimuthAngle < 157.5f -> "SE"
+            azimuthAngle >= 157.5f && azimuthAngle < 202.5f -> "S"
+            azimuthAngle >= 202.5f && azimuthAngle < 247.5f -> "SW"
+            azimuthAngle >= 247.5f && azimuthAngle < 292.5f -> "W"
+            azimuthAngle >= 292.5f && azimuthAngle < 337.5f -> "NW"
+            else -> "Unknown"
+        }
+    }
+}
+
+
+// level stuff??
+
